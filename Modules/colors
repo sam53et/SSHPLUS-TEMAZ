@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+# colors.sh — Modern terminal UI styling for SSH Plus Manager
+# Principles:
+# - Semantic roles (ui_*), not random colors everywhere
+# - Small palette (accent + muted + semantic ok/warn/danger)
+# - Works with NO_COLOR / non-tty / TERM=dumb
+# - Helpful UI primitives: hr, section, kv, menu, tables, badges, status dots
+# - Optional: 24-bit color if supported, else fall back to 16-color
+# Extensibility: add a new role by defining UI_FOO, adding ui_foo) in c(), then use c ui_foo or get_color_code ui_foo in scripts.
+
+# Strict mode only when run as main script; when sourced by menu/install, don't override caller.
+if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
+	set -o errexit -o nounset -o pipefail
+fi
+
+# -------------------- feature detection --------------------
+_is_tty() { [[ -t 1 ]]; }
+
+# Only disable color when explicitly requested (NO_COLOR) or TERM=dumb.
+# Do NOT require TTY or non-empty TERM — SSH, pipes, and many terminals still support color.
+_no_color() {
+  [[ -n "${NO_COLOR:-}" ]] && return 0
+  [[ "${TERM:-}" == "dumb" ]] && return 0
+  [[ -n "${FORCE_COLOR:-}" ]] && return 1
+  return 1
+}
+
+
+# Support truecolor if terminal claims it
+_has_truecolor() {
+  [[ "${COLORTERM:-}" =~ (truecolor|24bit) ]] && return 0
+  return 1
+}
+
+# -------------------- base codes --------------------
+ESC=$'\033'
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+DIM="${ESC}[2m"
+UL="${ESC}[4m"
+
+# 16-color fallback (widely supported)
+FG_TEXT_16="${ESC}[97m"     # bright white
+FG_MUTED_16="${ESC}[90m"    # bright black (gray)
+FG_ACCENT_16="${ESC}[96m"   # bright cyan/teal
+
+FG_OK_16="${ESC}[92m"
+FG_WARN_16="${ESC}[93m"
+FG_DANGER_16="${ESC}[91m"
+FG_INFO_16="${ESC}[96m"
+
+BG_DANGER_16="${ESC}[41m"
+BG_INFO_16="${ESC}[44m"
+
+# Truecolor accent (teal) + readable neutrals (used only if supported)
+# Teal: 0, 209, 178  | Muted gray: 140,140,140 | Text: 240,240,240
+_fg_rgb() { printf "%s[38;2;%s;%s;%sm" "$ESC" "$1" "$2" "$3"; }
+_bg_rgb() { printf "%s[48;2;%s;%s;%sm" "$ESC" "$1" "$2" "$3"; }
+
+# Resolve actual palette based on capability
+_init_palette() {
+  if _has_truecolor; then
+    FG_TEXT="$(_fg_rgb 240 240 240)"
+    FG_MUTED="$(_fg_rgb 145 145 145)"
+    FG_ACCENT="$(_fg_rgb 0 209 178)"
+    FG_OK="$(_fg_rgb 80 200 120)"
+    FG_WARN="$(_fg_rgb 255 200 80)"
+    FG_DANGER="$(_fg_rgb 255 95 95)"
+    FG_INFO="$(_fg_rgb 0 209 178)"
+    BG_DANGER="$(_bg_rgb 180 40 40)"
+    BG_INFO="$(_bg_rgb 30 80 160)"
+  else
+    FG_TEXT="$FG_TEXT_16"
+    FG_MUTED="$FG_MUTED_16"
+    FG_ACCENT="$FG_ACCENT_16"
+    FG_OK="$FG_OK_16"
+    FG_WARN="$FG_WARN_16"
+    FG_DANGER="$FG_DANGER_16"
+    FG_INFO="$FG_INFO_16"
+    BG_DANGER="$BG_DANGER_16"
+    BG_INFO="$BG_INFO_16"
+  fi
+}
+_init_palette
+
+# -------------------- semantic roles --------------------
+UI_FRAME="${DIM}${FG_MUTED}"
+UI_TITLE="${BOLD}${FG_ACCENT}"
+UI_SUBTITLE="${FG_MUTED}"
+UI_LABEL="${FG_MUTED}"
+UI_VALUE="${FG_TEXT}"
+UI_PROMPT="${BOLD}${FG_ACCENT}"
+
+UI_OK="${BOLD}${FG_OK}"
+UI_WARN="${BOLD}${FG_WARN}"
+UI_DANGER="${BOLD}${FG_DANGER}"
+UI_INFO="${BOLD}${FG_INFO}"
+
+UI_MENU_NUM="${BOLD}${FG_ACCENT}"
+UI_MENU_TXT="${FG_TEXT}"
+UI_SECTION="${BOLD}${FG_MUTED}"
+
+# -------------------- token composer --------------------
+# Usage: c ui_title; c bold accent; c reset; etc.
+c() {
+  _no_color && { printf ""; return 0; }
+
+  local token out=""
+  for token in "$@"; do
+    case "$token" in
+      reset) out+="${RESET}" ;;
+      bold) out+="${BOLD}" ;;
+      dim) out+="${DIM}" ;;
+      ul|underline) out+="${UL}" ;;
+
+      # base tokens (rare direct use)
+      text) out+="${FG_TEXT}" ;;
+      muted) out+="${FG_MUTED}" ;;
+      accent) out+="${FG_ACCENT}" ;;
+      ok) out+="${FG_OK}" ;;
+      warn) out+="${FG_WARN}" ;;
+      danger) out+="${FG_DANGER}" ;;
+      info) out+="${FG_INFO}" ;;
+
+      # semantic roles
+      ui_frame) out+="${UI_FRAME}" ;;
+      ui_title) out+="${UI_TITLE}" ;;
+      ui_subtitle) out+="${UI_SUBTITLE}" ;;
+      ui_label) out+="${UI_LABEL}" ;;
+      ui_value) out+="${UI_VALUE}" ;;
+      ui_prompt) out+="${UI_PROMPT}" ;;
+      ui_ok) out+="${UI_OK}" ;;
+      ui_warn) out+="${UI_WARN}" ;;
+      ui_danger) out+="${UI_DANGER}" ;;
+      ui_info) out+="${UI_INFO}" ;;
+      ui_menu_num) out+="${UI_MENU_NUM}" ;;
+      ui_menu_txt) out+="${UI_MENU_TXT}" ;;
+      ui_section) out+="${UI_SECTION}" ;;
+
+      # rare backgrounds (banners only)
+      bg_danger) out+="${BG_DANGER}${FG_TEXT}${BOLD}" ;;
+      bg_info) out+="${BG_INFO}${FG_TEXT}${BOLD}" ;;
+
+      # legacy names (for get_color_code from install/scripts); map to semantic/base
+      red) out+="${FG_DANGER}" ;;
+      green) out+="${FG_OK}" ;;
+      yellow) out+="${FG_WARN}" ;;
+      blue) out+="${FG_ACCENT}" ;;
+      cyan) out+="${FG_ACCENT}" ;;
+      white) out+="${FG_TEXT}" ;;
+      black) out+="${FG_MUTED}" ;;
+      grey|gray) out+="${FG_MUTED}" ;;
+    esac
+  done
+  printf "%s" "$out"
+}
+
+reset() { _no_color && printf "" || printf "%s" "$RESET"; }
+
+# -------------------- terminal sizing --------------------
+term_cols() { tput cols 2>/dev/null || printf "80"; }
+
+repeat_char() {
+  local ch="$1" n="$2" i
+  # Loop ensures multi-byte UTF-8 (e.g. ━) repeats correctly; tr can mangle it
+  for (( i = 0; i < n; i++ )); do printf "%s" "$ch"; done
+}
+
+# -------------------- primitives --------------------
+hr() {
+  local ch="${1:-━}" cols
+  cols="$(term_cols)"
+  if _no_color; then
+    repeat_char "━" "$cols"; printf "\n"; return 0
+  fi
+  printf "%b%s%b\n" "$(c ui_frame)" "$(repeat_char "$ch" "$cols")" "$(reset)"
+}
+
+section() {
+  printf "\n%b%s%b\n" "$(c ui_section)" "$1" "$(reset)"
+}
+
+title_line() {
+  # Big title + rule
+  printf "%b%s%b\n" "$(c ui_title)" "$1" "$(reset)"
+  hr
+}
+
+# header_line "Left title" "right value" — same line, right part right-aligned to terminal width
+header_line() {
+  local left="$1" right="$2" cols pad
+  cols="$(term_cols)"
+  pad=$(( cols - ${#left} - ${#right} ))
+  [[ $pad -lt 1 ]] && pad=1
+  printf "%b%s%b%*s%b%s%b\n" "$(c ui_title)" "$left" "$(reset)" "$pad" "" "$(c ui_value)" "$right" "$(reset)"
+}
+
+kv() {
+  # key/value line
+  local k="$1" v="$2"
+  printf "%b%-10s%b %b%s%b\n" "$(c ui_label)" "${k}:" "$(reset)" "$(c ui_value)" "$v" "$(reset)"
+}
+
+# -------------------- messages --------------------
+# Use two spaces after the icon so it remains visually separated from text
+# even with double-width emoji glyphs in some terminals.
+# All msg_* wait for Enter so the user can read the message.
+_msg_wait_enter() {
+	printf "\n%bPress Enter to continue...%b" "$(c muted)" "$(reset)"
+	read -r
+}
+msg_ok()   { printf "%b✔  %s%b\n" "$(c ui_ok)" "$1" "$(reset)"; _msg_wait_enter; }
+msg_warn() { printf "%b⚠  %s%b\n" "$(c ui_warn)" "$1" "$(reset)"; _msg_wait_enter; }
+msg_err()  { printf "%b✖  %s%b\n" "$(c ui_danger)" "$1" "$(reset)"; _msg_wait_enter; }
+msg_info() { printf "%bℹ  %s%b\n" "$(c ui_info)" "$1" "$(reset)"; _msg_wait_enter; }
+
+banner_info()   { printf "%b %s %b\n" "$(c bg_info)" "$1" "$(reset)"; }
+banner_danger() { printf "%b %s %b\n" "$(c bg_danger)" "$1" "$(reset)"; }
+
+# -------------------- badges / status --------------------
+# status_dot <active|idle|inactive|unknown>
+status_dot() {
+  local s="${1:-unknown}"
+  case "$s" in
+    active)   printf "%b●%b" "$(c ok)" "$(reset)" ;;
+    idle)     printf "%b●%b" "$(c warn)" "$(reset)" ;;
+    inactive) printf "%b●%b" "$(c danger)" "$(reset)" ;;
+    *)        printf "%b●%b" "$(c muted)" "$(reset)" ;;
+  esac
+}
+
+# badge <text> <ui_ok|ui_warn|ui_danger|ui_info|ui_frame>
+badge() {
+  local text="$1" style="${2:-ui_frame}"
+  printf "%b[%s]%b" "$(c "$style")" "$text" "$(reset)"
+}
+
+# -------------------- menus --------------------
+menu_option() {
+  # menu_option 1 "Create user"
+  local n="$1" text="$2"
+  printf "%b[%02d]%b %b%s%b\n" "$(c ui_menu_num)" "$n" "$(reset)" "$(c ui_menu_txt)" "$text" "$(reset)"
+}
+
+# Same as menu_option but no trailing newline (for two-column layout)
+menu_option_n() {
+  local n="$1" text="$2"
+  printf "%b[%02d]%b %b%s%b" "$(c ui_menu_num)" "$n" "$(reset)" "$(c ui_menu_txt)" "$text" "$(reset)"
+}
+
+prompt() {
+  # prompt "Select option: "
+  printf "%b%s%b" "$(c ui_prompt)" "$1" "$(reset)"
+}
+
+# -------------------- tables --------------------
+# table_header "COL1" 12 "COL2" 8 ...
+table_header() {
+  local cols=("$@") i label width line=""
+  for ((i=0; i<${#cols[@]}; i+=2)); do
+    label="${cols[i]}"; width="${cols[i+1]}"
+    line+=$(printf "%-${width}s " "$label")
+  done
+  printf "%b%s%b\n" "$(c ui_frame)" "$line" "$(reset)"
+  hr
+}
+
+# table_row "text_style" "VAL1" 12 "VAL2" 8 ...
+# text_style can be: ui_value, ui_frame, etc.
+table_row() {
+  local style="$1"; shift
+  local cols=("$@") i val width line=""
+  for ((i=0; i<${#cols[@]}; i+=2)); do
+    val="${cols[i]}"; width="${cols[i+1]}"
+    line+=$(printf "%-${width}s " "$val")
+  done
+  printf "%b%s%b\n" "$(c "$style")" "$line" "$(reset)"
+}
+
+# -------------------- formatting utilities --------------------
+fmt_traffic() {
+  # fmt_traffic "0B/0B" -> muted, else accent
+  local t="$1"
+  if [[ "$t" == "0B/0B" || "$t" == "↓0B/↑0B" || "$t" == "0B / 0B" ]]; then
+    printf "%b%s%b" "$(c muted)" "$t" "$(reset)"
+  else
+    printf "%b%s%b" "$(c accent)" "$t" "$(reset)"
+  fi
+}
+
+fmt_last_seen() {
+  # fmt_last_seen "never" -> muted, else value
+  local t="$1"
+  if [[ "$t" == "never" || -z "$t" ]]; then
+    printf "%b%s%b" "$(c muted)" "never" "$(reset)"
+  else
+    printf "%b%s%b" "$(c ui_value)" "$t" "$(reset)"
+  fi
+}
+
+# -------------------- confirmation UX (advanced) --------------------
+confirm() {
+  # confirm "Remove script?" -> returns 0 yes, 1 no
+  local q="$1" ans
+  prompt "$q [y/N]: "
+  read -r ans
+  [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]
+}
+
+# -------------------- spinner (advanced, non-blocking feel) --------------------
+spinner() {
+  # spinner <pid> <message>
+  local pid="$1" msg="${2:-Working...}"
+  local frames='|/-\' i=0
+  _no_color && { wait "$pid"; return $?; }
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r%b%s%b %c" "$(c ui_info)" "$msg" "$(reset)" "${frames:i%4:1}"
+    sleep 0.1
+    ((i++))
+  done
+  printf "\r%*s\r" "$(term_cols)" ""
+  wait "$pid"
+}
+
+# -------------------- legacy compatibility (scripts expect these) --------------------
+# Color selection menu (used by connections banner/theme)
+show_color_menu() {
+  printf "\n"
+  menu_option 1 "BLUE"
+  menu_option 2 "GREEN"
+  menu_option 3 "RED"
+  menu_option 4 "YELLOW"
+  menu_option 5 "ROSE"
+  menu_option 6 "CYAN"
+  menu_option 7 "ORANGE"
+  menu_option 8 "PURPLE"
+  menu_option 9 "BLACK"
+  menu_option 10 "WITHOUT COLOR"
+  printf "\n"
+}
+
+# Progress bar color pipe (yellow|red|white|green|reset) for fun_bar-style scripts
+get_progress_colors() {
+  printf "%s|%s|%s|%s|%s" "$(c warn)" "$(c danger)" "$(c text)" "$(c ok)" "$(reset)"
+}
+
+# Exported helpers for convenience
+get_color_code() { c "$1"; }
+get_reset_code() { reset; }
+
+# Ad-hoc colored text (script-friendly; prefer msg_* / prompt() for messages/prompts)
+color_echo()  { printf "%b%s%b\n" "$(c "${2:-white}")" "$1" "$(reset)"; }
+color_echo_n(){ printf "%b%s%b" "$(c "${2:-white}")" "$1" "$(reset)"; }

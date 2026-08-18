@@ -1,0 +1,4 @@
+#!/bin/bash
+# expiredusers – compatibility wrapper (old menu item [06]); forwards to expirationmanager.
+
+exec /bin/expirationmanager 2>/dev/null || exec expirationmanager
