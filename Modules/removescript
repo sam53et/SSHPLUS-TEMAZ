@@ -30,6 +30,8 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
 		rm -f /bin/restartservices /bin/rebootsystem /bin/updatescript /bin/connections 2>/dev/null
 		rm -f /bin/vpsinfo /bin/userinfo /bin/verifatt /bin/uexpired 2>/dev/null
 		rm -f /bin/multiport /bin/vpstraffic /bin/autorun 2>/dev/null
+		# removescript kendi kendini en son siler (çalışırken silinmesi Linux'ta sorunsuzdur)
+		rm -f /bin/removescript 2>/dev/null
 
 		# 2) install.sh'nin ayrıca /bin altına yazdığı ekstra dosyalar
 		rm -f /bin/h /bin/version 2>/dev/null
@@ -50,6 +52,8 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
 
 		# 7) Kullanıcı veritabanı, oturum kayıtları ve yedekleri (HOME dizininde, genelde /root)
 		rm -f "${HOME:-/root}/users.db" "${HOME:-/root}/sessions.log" 2>/dev/null
+		rm -f "${HOME:-/root}/users.db.lock" 2>/dev/null
+		rm -rf "${HOME:-/root}/users.db.lock.d" 2>/dev/null
 		rm -f "${HOME:-/root}"/users.db.bak.* 2>/dev/null
 		rm -f /home/sshplus 2>/dev/null
 
