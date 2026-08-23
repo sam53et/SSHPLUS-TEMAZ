@@ -1,7 +1,8 @@
 #!/bin/bash
-# removescript – remove SSH Plus Manager installation (menu option [19] REMOVE SCRIPT).
+# removescript – SSH Plus Manager kurulumunu TAM olarak kaldırır (menü [19] REMOVE SCRIPT).
+# install.sh + Install/list dosyalarına göre kurulan HER dosya/dizin/crontab satırı buradan silinir.
 
-# Load color helpers (install path vs dev path)
+# Renk yardımcılarını yükle (kurulu yol / bin yolu / script yanı)
 if [[ -f /etc/SSHPlus/colors ]]; then
 	source /etc/SSHPlus/colors
 elif [[ -f /bin/colors ]]; then
@@ -20,12 +21,57 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
 	read -r confirm2
 	if [[ "$confirm2" == "DELETE" ]]; then
 		color_echo "Removing installation..." "yellow"
-		rm -f /bin/menu 2>/dev/null
-		rm -f /bin/changepassword /bin/createuser /bin/expiredusers /bin/changeexpiration /bin/removeuser 2>/dev/null
-		rm -f /bin/sshmonitor /bin/changelimit /bin/connections /bin/multiport /bin/userinfo 2>/dev/null
-		rm -f /bin/rootpassword /bin/bannersetup /bin/vpstraffic /bin/vpsinfo /bin/rebootsystem /bin/restartservices 2>/dev/null
-		rm -f /bin/userbackup /bin/speedtest /bin/autorun /bin/updatescript /bin/removescript 2>/dev/null
-		msg_ok "Script removed. Some configuration files may remain in /etc/SSHPlus"
+
+		# 1) /bin altına Install/list tarafından indirilen TÜM modüller (_mdls dizisiyle birebir)
+		rm -f /bin/changepassword /bin/createuser /bin/expiredusers /bin/changeexpiration 2>/dev/null
+		rm -f /bin/expirationmanager /bin/removeuser /bin/verifbot /bin/droplimiter 2>/dev/null
+		rm -f /bin/changelimit /bin/ajuda /bin/sshmonitor /bin/userbackup /bin/instsqd 2>/dev/null
+		rm -f /bin/menu /bin/speedtest /bin/bannersetup /bin/serversettings 2>/dev/null
+		rm -f /bin/restartservices /bin/rebootsystem /bin/updatescript /bin/connections 2>/dev/null
+		rm -f /bin/vpsinfo /bin/userinfo /bin/verifatt /bin/uexpired 2>/dev/null
+		rm -f /bin/multiport /bin/vpstraffic /bin/autorun 2>/dev/null
+
+		# 2) install.sh'nin ayrıca /bin altına yazdığı ekstra dosyalar
+		rm -f /bin/h /bin/version 2>/dev/null
+
+		# 3) Install/list tarafından indirilip /etc/SSHPlus'a taşınan yardımcı dosyalar
+		#    (dizinin tamamını sildiğimiz için tek tek silmeye gerek yok ama emin olmak için:)
+		rm -f /etc/SSHPlus/cabecalho /etc/SSHPlus/bot /etc/SSHPlus/open.py 2>/dev/null
+		rm -f /etc/SSHPlus/proxy.py /etc/SSHPlus/colors /etc/SSHPlus/db 2>/dev/null
+
+		# 4) /etc/SSHPlus tüm yapılandırma dizini (userteste, .tmp, version dahil)
+		rm -rf /etc/SSHPlus 2>/dev/null
+
+		# 5) /etc/bot bot verileri dizini (info-users, arquivos, revenda, suspensos, lista_*)
+		rm -rf /etc/bot 2>/dev/null
+
+		# 6) Diğer kök seviyesi dosyalar (Install/list ve install.sh tarafından oluşturulan)
+		rm -f /etc/autostart /etc/IP /usr/lib/sshplus 2>/dev/null
+
+		# 7) Kullanıcı veritabanı, oturum kayıtları ve yedekleri (HOME dizininde, genelde /root)
+		rm -f "${HOME:-/root}/users.db" "${HOME:-/root}/sessions.log" 2>/dev/null
+		rm -f "${HOME:-/root}"/users.db.bak.* 2>/dev/null
+		rm -f /home/sshplus 2>/dev/null
+
+		# 8) Kurulum/uygulama log dizini
+		rm -rf /var/log/sshplus /tmp/sshplus-install.log 2>/dev/null
+
+		# 9) install.sh/Install/list tarafından eklenen crontab satırlarını temizle
+		#    (diğer kullanıcı crontab satırlarına dokunulmaz, sadece bu 4 satır kaldırılır)
+		crontab -l 2>/dev/null | grep -v -F \
+			-e '/bin/verifatt' \
+			-e '@reboot /etc/autostart' \
+			-e '* * * * * /etc/autostart' \
+			-e '/bin/uexpired' \
+			| crontab - 2>/dev/null
+
+		# 10) install.sh tarafından açılan UFW portlarını kapat (varsa)
+		if [[ -x /usr/sbin/ufw ]]; then
+			/usr/sbin/ufw delete allow 3128/tcp >/dev/null 2>&1
+			/usr/sbin/ufw delete allow 8799/tcp >/dev/null 2>&1
+		fi
+
+		msg_ok "Script and all installed files fully removed."
 		sleep 3
 		exit 0
 	fi
