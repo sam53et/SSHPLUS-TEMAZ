@@ -48,7 +48,9 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
 		rm -rf /etc/bot 2>/dev/null
 
 		# 6) Diğer kök seviyesi dosyalar (Install/list ve install.sh tarafından oluşturulan)
-		rm -f /etc/autostart /etc/IP /usr/lib/sshplus 2>/dev/null
+		rm -f /etc/autostart /etc/IP /usr/lib/sshplus /usr/lib/licence 2>/dev/null
+		# install.sh'nin geçici indirme dizini (normalde Install/list kendini siler, garanti olsun diye)
+		rm -f /usr/local/lib/list 2>/dev/null
 
 		# 7) Kullanıcı veritabanı, oturum kayıtları ve yedekleri (HOME dizininde, genelde /root)
 		rm -f "${HOME:-/root}/users.db" "${HOME:-/root}/sessions.log" 2>/dev/null
