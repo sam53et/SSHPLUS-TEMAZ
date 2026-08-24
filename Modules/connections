@@ -560,6 +560,7 @@ fi
 				color_echo "REMOVING SSL TUNNEL !" "green"
 				del_ssl() {
 					service stunnel4 stop
+					systemctl disable stunnel4 # Kaldırılınca boot'ta başlamasın diye eklendi
 					apt-get remove stunnel4 -y
 					apt-get autoremove stunnel4 -y
 					apt-get purge stunnel4 -y
@@ -640,6 +641,7 @@ fi
 					service stunnel4 restart
 					service ssh restart
 					/etc/init.d/stunnel4 restart
+					systemctl enable stunnel4 # Reboot sonrası otomatik başlaması için eklendi
 				}
 				fun_bar 'fun_finssl' 'service stunnel4 restart'
 				echo ""
