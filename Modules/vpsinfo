@@ -65,6 +65,26 @@ _disk_pct=$(df -h / 2>/dev/null | awk 'NR==2{print $5}')
 _ports=$(ss -tuln 2>/dev/null | awk '/LISTEN/ {gsub(/.*:/,"",$5); print $5}' | sort -nu | tr '\n' ' ')
 [[ -z "$_ports" ]] && _ports=$(netstat -tuln 2>/dev/null | awk '/LISTEN/ {gsub(/.*:/,"",$4); print $4}' | sort -nu | tr '\n' ' ')
 [[ -z "$_ports" ]] && _ports="N/A"
+
+# Açık portları servis/uygulama adıyla birlikte listelemek için eklendi
+_openports_fmt=""
+if command -v ss >/dev/null 2>&1; then
+	while read -r proto state recvq sendq local peer proc; do
+		[[ "$proto" != "tcp" && "$proto" != "udp" ]] && continue
+		port=$(echo "$local" | awk -F: '{print $NF}')
+		svc=$(echo "$proc" | grep -oP '(?<=users:\(\(")[^"]+' | head -1)
+		[[ -z "$svc" ]] && svc="-"
+		_openports_fmt+="  ${bl}$(printf '%-4s' "$proto")${w} $(printf '%-8s' "$port") ${g}${svc}${reset}\n"
+	done < <(ss -tulnp 2>/dev/null | tail -n +2)
+elif command -v netstat >/dev/null 2>&1; then
+	while read -r proto rq sq local foreign state pidprog; do
+		port=$(echo "$local" | awk -F: '{print $NF}')
+		svc=$(echo "$pidprog" | awk -F/ '{print $2}')
+		[[ -z "$svc" ]] && svc="-"
+		_openports_fmt+="  ${bl}$(printf '%-4s' "$proto")${w} $(printf '%-8s' "$port") ${g}${svc}${reset}\n"
+	done < <(netstat -tulnp 2>/dev/null | tail -n +3)
+fi
+[[ -z "$_openports_fmt" ]] && _openports_fmt="  ${g}N/A${reset}\n"
 _net_if=$(ip route 2>/dev/null | grep default | awk '{print $5}' | head -1)
 if [[ -n "$_net_if" ]] && [[ -f /proc/net/dev ]]; then
 	_rx_mb=$(grep -F "${_net_if}" /proc/net/dev 2>/dev/null | awk '{printf "%.2f", $2/1024/1024}')
@@ -131,6 +151,8 @@ echo -e "  ${g}Disk (/):${w}    $_disk_used / $_disk_total (${_disk_pct})${reset
 echo -e "  ${g}Network:${w}     $_net_stats${reset}"
 echo -e "  ${g}Listening:${w}   $_ports${reset}"
 echo ""
+section "OPEN PORTS"
+echo -e "$_openports_fmt"
 section "CONNECTIONS"
 echo -e "  ${g}SSH/Dropbear:${w} $_ssh / $_drop${reset}"
 echo -e "  ${g}OpenVPN:${w}      $_open${reset}"
@@ -144,3 +166,5 @@ echo -e "  ${g}Sessions:${w}     ${_sess_count} entries, total ⇅ $(fmt_bytes_c
 echo -e "  ${g}Last session:${w} ${_sess_last}${reset}"
 echo -e "  ${g}Privacy:${w}      IP/banner logging ${_privacy}${reset}"
 echo ""
+echo -e "${g}Press Enter to return to the menu...${reset}"
+read -r # Bilgiler okunabilsin diye eklendi; menüye dönmeden önce bekler
