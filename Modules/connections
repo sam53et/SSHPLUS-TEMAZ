@@ -79,6 +79,10 @@ fi
 				color_echo "REMOVING THE SQUID PROXY !" "green"
 				echo ""
 				rem_sqd() {
+					# FIX 5: kaldırma öncesi squid.conf'tan açılan portları oku ki UFW kurallarını kapatabilelim
+					local ports_to_close=""
+					[[ -f "/etc/squid/squid.conf" ]] && ports_to_close=$(grep '^http_port' /etc/squid/squid.conf | awk '{print $2}')
+					[[ -f "/etc/squid3/squid.conf" ]] && ports_to_close="$ports_to_close $(grep '^http_port' /etc/squid3/squid.conf | awk '{print $2}')"
 					[[ -d "/etc/squid" ]] && {
 						apt-get remove squid -y >/dev/null 2>&1
 						apt-get purge squid -y >/dev/null 2>&1
@@ -89,6 +93,16 @@ fi
 						apt-get purge squid3 -y >/dev/null 2>&1
 						rm -rf /etc/squid3 >/dev/null 2>&1
 					}
+					# FIX 5 (devam): kurulumda açılan UFW portlarını kapat
+					[[ -f "/usr/sbin/ufw" ]] && for p in $ports_to_close; do
+						ufw delete allow $p/tcp >/dev/null 2>&1
+					done
+					# FIX 6: log ve cache (spool) dizinlerini de temizle, apt purge bunlara dokunmuyor
+					rm -rf /var/log/squid >/dev/null 2>&1
+					rm -rf /var/spool/squid >/dev/null 2>&1
+					rm -rf /var/spool/squid3 >/dev/null 2>&1
+					# FIX 7: kurulumla birlikte gelen ve artık kullanılmayan bağımlılıkları temizle
+					apt-get autoremove -y >/dev/null 2>&1
 				}
 				fun_bar 'rem_sqd'
 				echo ""
@@ -136,7 +150,9 @@ fi
 			echo ""
 			color_echo "INSTALLING SQUID PROXY" "green"
 			echo ""
-			fun_bar 'apt-get update -y' 'instsqd'
+			# FIX: 'instsqd' was an undefined function, so squid was never actually
+			# installed (only 'apt-get update' ran). Replaced with the real install command.
+			fun_bar 'apt-get update -y' 'apt-get install squid -y'
 			if [[ -d "/etc/squid/" ]]; then
 				var_sqd="/etc/squid/squid.conf"
 				var_pay="/etc/squid/payload.txt"
@@ -160,10 +176,12 @@ fi
 				.oi.com.br/
 			EOF
 			cat <<-EOF >$var_sqd
-				acl url1 dstdomain -i 127.0.0.1
-				acl url2 dstdomain -i localhost
-				acl url3 dstdomain -i $ipdovps
-				acl url4 dstdomain -i /SSHPLUS?
+				# FIX: removed unsupported "-i" flag from dstdomain ACLs.
+				# Squid 6.x rejects "-i" on dstdomain (it's case-insensitive by default already).
+				acl url1 dstdomain 127.0.0.1
+				acl url2 dstdomain localhost
+				acl url3 dstdomain $ipdovps
+				acl url4 dstdomain /SSHPLUS?
 				acl payload url_regex -i "$var_pay"
 				acl all src 0.0.0.0/0
 
@@ -305,7 +323,7 @@ fi
 		[[ "$(netstat -nplt | grep -c 'squid')" = "0" ]] && inst_sqd
 		banner_info "          MANAGE SQUID PROXY           "
 		[[ "$(netstat -nplt | grep -c 'squid')" != "0" ]] && {
-			sqdp=$(netstat -nplt | grep 'squid' | awk -F ":" {'print $4'} | xargs)
+			sqdp=$(netstat -nplt | grep 'squid' | awk '{print $4}' | sed 's/.*://' | xargs) # FIX 1: eski "awk -F \":\"" yöntemi IP:PORT formatındaki fazla ":" nedeniyle boş sonuç veriyordu, port artık doğru okunuyor
 			echo -e "\n\033[1;33mPORTS\033[1;37m: \033[1;32m$sqdp"
 			VarSqdOn="REMOVE SQUID PROXY"
 		} || {
@@ -350,7 +368,7 @@ fi
 	fun_drop() {
 		if netstat -nltp | grep 'dropbear' 1>/dev/null 2>/dev/null; then
 			clear
-			[[ $(netstat -nltp | grep -c 'dropbear') != '0' ]] && dpbr=$(netstat -nplt | grep 'dropbear' | awk -F ":" {'print $4'} | xargs) || sqdp="\033[1;31mUNAVAILABLE"
+			[[ $(netstat -nltp | grep -c 'dropbear') != '0' ]] && dpbr=$(netstat -nplt | grep 'dropbear' | awk '{print $4}' | sed 's/.*://' | sort -u | xargs) || sqdp="\033[1;31mUNAVAILABLE" # FIX 2: port okuma hatası + FIX 8: IPv4/IPv6 aynı port için tekrar gösterimi (sort -u ile tekilleştirildi)
 			if ps x | grep "limiter" | grep -v grep 1>/dev/null 2>/dev/null; then
 				stats='\033[1;32m◉ '
 			else
@@ -561,12 +579,16 @@ fi
 				del_ssl() {
 					service stunnel4 stop
 					systemctl disable stunnel4 # Kaldırılınca boot'ta başlamasın diye eklendi
+					pkill -9 -f stunnel4 2>/dev/null # Servis stop ile kapanmayan/arta kalan stunnel4 process'lerini zorla sonlandırır, "kalıntı" görünmesinin bir nedeni budur
 					apt-get remove stunnel4 -y
 					apt-get autoremove stunnel4 -y
 					apt-get purge stunnel4 -y
-					rm -rf /etc/stunnel/stunnel.conf
+					rm -rf /etc/stunnel # Sadece conf/pem dosyalarını değil, tüm /etc/stunnel klasörünü (ör. yarım kalmış cert.pem/key.pem dosyaları) siler
 					rm -rf /etc/default/stunnel4
-					rm -rf /etc/stunnel/stunnel.pem
+					rm -f /etc/init.d/stunnel4 # Paket kaldırılsa da bazen sistemde unutulan init script'i temizler
+					rm -rf /var/log/stunnel4 # Eski log dosyalarını temizler
+					systemctl daemon-reload # systemd'nin artık var olmayan stunnel4 servisini önbelleğinde tutmasını engeller
+					systemctl reset-failed stunnel4 2>/dev/null # "failed" durumda takılı kalmış servis kaydını temizler
 				}
 				echo ""
 				fun_bar 'del_ssl'
@@ -1822,13 +1844,13 @@ exit 0' >$RCLOCAL
 				sts3="\033[1;31m○ "
 			}
 			[[ "$(netstat -tlpn | grep 'dropbear' | wc -l)" != '0' ]] && {
-				echo -e "\033[1;32mSERVICE: \033[1;33mDROPBEAR \033[1;32mPORT: \033[1;37m$(netstat -nplt | grep 'dropbear' | awk -F ":" {'print $4'} | xargs)"
+				echo -e "\033[1;32mSERVICE: \033[1;33mDROPBEAR \033[1;32mPORT: \033[1;37m$(netstat -nplt | grep 'dropbear' | awk '{print $4}' | sed 's/.*://' | sort -u | xargs)" # FIX 3: port okuma hatası + FIX 8: menüde "110 110" gibi tekrarlı port gösterimi (sort -u ile tekilleştirildi)
 				sts2="\033[1;32m◉ "
 			} || {
 				sts2="\033[1;31m○ "
 			}
 			[[ "$(netstat -tlpn | grep 'squid' | wc -l)" != '0' ]] && {
-				echo -e "\033[1;32mSERVICE: \033[1;33mSQUID PROXY\033[1;32mPORT: \033[1;37m$(netstat -nplt | grep 'squid' | awk -F ":" {'print $4'} | xargs)"
+				echo -e "\033[1;32mSERVICE: \033[1;33mSQUID PROXY\033[1;32mPORT: \033[1;37m$(netstat -nplt | grep 'squid' | awk '{print $4}' | sed 's/.*://' | xargs)" # FIX 4: menüde SQUID PROXY portunun boş görünme sorunu bu satırdaydı, artık port doğru okunuyor
 				sts1="\033[1;32m◉ "
 			} || {
 				sts1="\033[1;31m○ "
