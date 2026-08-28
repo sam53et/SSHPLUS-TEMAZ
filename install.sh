@@ -262,8 +262,43 @@ fi
 DEPS_INSTALLER=(curl wget ca-certificates gnupg unzip tar)
 DEPS_RUNTIME=(
 	wget curl bc screen nano unzip zip lsof net-tools dos2unix nload jq figlet
-	python3 python3-pip speedtest-cli iproute2 cron
+	# [DEĞİŞTİ] "speedtest-cli" bu listeden çıkarıldı; jq zaten burada olduğu
+	# için Ookla CLI'nin JSON çıktısını parse etmek için ek paket gerekmiyor
+	python3 python3-pip iproute2 cron
 )
+
+# [YENİ] Ookla Speedtest CLI apt paketiyle DEĞİL, doğrudan Ookla'nın statik
+# tar.gz arşivinden kuruluyor. Bunun 2 nedeni var:
+#   1) apt paketinin adı "speedtest" ve /usr/bin/speedtest'e kurulur; bu da
+#      Debian 12 ve Ubuntu 24'ün ikisinde de (merged-usr: /bin -> /usr/bin)
+#      SSHPlus'ın kendi /bin/speedtest menü scriptiyle çakışır.
+#   2) Ookla'nın apt reposu (repo.speedtest.net) dağıtım kod adına (bookworm/
+#      noble) göre paket sunar; statik tar.gz ise dağıtımdan bağımsız olduğu
+#      için hem Debian 12 hem Ubuntu 24'te aynı şekilde çalışır, repo/GPG key
+#      eklemeye gerek kalmaz.
+install_ookla_speedtest() {
+	local bin="/usr/local/bin/ookla-speedtest"
+	[[ -x "$bin" ]] && return 0
+	local arch url tmp
+	# [YENİ] mimari adı Ookla'nın arşiv isimlendirmesine çevriliyor (iki dağıtımda da aynı isimler geçerli)
+	case "$(uname -m)" in
+		x86_64) arch="x86_64" ;;
+		aarch64|arm64) arch="aarch64" ;;
+		armv7l) arch="armhf" ;;
+		*) step_warn "Unsupported architecture for Ookla Speedtest CLI: $(uname -m)"; return 1 ;;
+	esac
+	tmp=$(mktemp -d)
+	url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${arch}.tgz"
+	if ! curl -fsSL "$url" -o "$tmp/speedtest.tgz" 2>>"$LOG_FILE"; then
+		step_warn "Failed to download Ookla Speedtest CLI (see $LOG_FILE)."
+		rm -rf "$tmp"
+		return 1
+	fi
+	tar -xzf "$tmp/speedtest.tgz" -C "$tmp" speedtest
+	install -m 0755 "$tmp/speedtest" "$bin"
+	rm -rf "$tmp"
+	[[ -x "$bin" ]] && log "Ookla Speedtest CLI installed at $bin"
+}
 DEPS_SERVER_SETTINGS=(systemd-sysv tzdata)
 
 MISSING_DEPS=()
@@ -503,6 +538,8 @@ main() {
 	# Dependencies
 	check_deps "${DEPS_INSTALLER[@]}" "${DEPS_RUNTIME[@]}" "${DEPS_SERVER_SETTINGS[@]}"
 	install_deps
+	# [YENİ] apt bağımlılıklarından sonra Ookla Speedtest CLI ayrıca kuruluyor
+	install_ookla_speedtest
 
 	# Download core installer payload
 	download_install_list
