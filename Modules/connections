@@ -424,7 +424,11 @@ fi
 				fun_bar 'sleep 2'
 				echo -e "\n\033[1;32mRESETTING DROPBEAR!"
 				echo ""
-				fun_bar 'service dropbear restart' '/etc/init.d/dropbear restart'
+				# FIX 9 (Ubuntu 24 / Debian 12): Debian's dropbear.service can hit systemd's
+				# start-limit lockout (e.g. after an earlier failed start on the wrong port),
+				# which silently blocks 'service dropbear restart'. Clearing it first is a
+				# no-op on Ubuntu (never locked) and fixes the stuck/red status on Debian.
+				fun_bar 'systemctl reset-failed dropbear' 'service dropbear restart'
 				echo ""
 				msg_ok "PORT CHANGED SUCCESSFULLY!"
 				sleep 3
@@ -506,6 +510,12 @@ fi
 				echo -e "\033[1;32mFINISHING INSTALLATION !\033[0m"
 				echo ""
 				fun_ondrop() {
+					# FIX 9 (Ubuntu 24 / Debian 12): on Debian, apt's postinst auto-starts
+					# dropbear right after install, before DROPBEAR_PORT above is corrected
+					# in /etc/default/dropbear, so it crashes on port 22 (busy, used by
+					# OpenSSH) and systemd locks the unit with a start-limit. Clear that
+					# lockout before starting - a no-op on Ubuntu where it never locks.
+					systemctl reset-failed dropbear
 					service dropbear start
 					/etc/init.d/dropbear restart
 				}
