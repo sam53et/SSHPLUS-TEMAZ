@@ -9,6 +9,12 @@ elif [[ -f "$(dirname "$0")/colors" ]]; then
 	source "$(dirname "$0")/colors"
 fi
 
+OOKLA_BIN="/usr/local/bin/ookla-speedtest"
+# [DEĞİŞTİ] speedtest-cli yerine Ookla resmi CLI kullanılıyor.
+# Binary /usr/local/bin/ookla-speedtest yoluna kuruluyor; "speedtest" adını
+# KULLANMIYORUZ çünkü Debian 12 / Ubuntu 24'te /bin -> /usr/bin symlink'i
+# yüzünden bu isim SSHPlus'ın kendi /bin/speedtest menü scriptiyle çakışır.
+
 run_speedtest() {
 	local out_png="$HOME/speed_png" out_down="$HOME/speed_down" out_upl="$HOME/speed_upl" out_lnk="$HOME/speed_lnk" out_err="$HOME/speed_err"
 	echo "N/A" >"$out_png"
@@ -16,20 +22,47 @@ run_speedtest() {
 	echo "N/A" >"$out_upl"
 	echo "N/A" >"$out_lnk"
 	: >"$out_err"
-	if ! command -v speedtest-cli >/dev/null 2>&1; then
+	if ! command -v "$OOKLA_BIN" >/dev/null 2>&1; then
+		# [DEĞİŞTİ] eskiden "speedtest-cli" komutu aranıyordu
 		echo "SPEEDTEST_CLI_MISSING" >"$out_lnk"
 		return 1
 	fi
+	if ! command -v jq >/dev/null 2>&1; then
+		# [YENİ] Ookla'nın JSON çıktısını parse etmek için jq gerekiyor
+		echo "JQ_MISSING" >"$out_lnk"
+		return 1
+	fi
 	local raw
-	raw=$(speedtest-cli --simple 2>"$out_err") || true
+	# [DEĞİŞTİ] "speedtest-cli --simple" yerine Ookla CLI'nin JSON çıktısı alınıyor.
+	# --accept-license --accept-gdpr: ilk çalıştırmada çıkan lisans onayını
+	# otomatik geçmek için gerekli (yoksa script interaktif olmayan ortamda takılır).
+	raw=$("$OOKLA_BIN" --accept-license --accept-gdpr -f json 2>"$out_err") || true
 	if [[ -z "$raw" ]]; then
 		echo "SPEEDTEST_CLI_FAIL" >"$out_lnk"
 		return 1
 	fi
-	echo "$raw" | awk -F': ' '/Ping/{gsub(/ ms/,"",$2); printf "%.2f ms\n", $2}' >"$out_png"
-	echo "$raw" | awk -F': ' '/Download/{gsub(/ *Mbit\/s/,"",$2); printf "%.2f Mbps\n", $2+0}' >"$out_down"
-	echo "$raw" | awk -F': ' '/Upload/{gsub(/ *Mbit\/s/,"",$2); printf "%.2f Mbps\n", $2+0}' >"$out_upl"
-	echo "speedtest-cli" >"$out_lnk"
+	local ping down_bw upl_bw down_mbps upl_mbps server_name url
+	# [DEĞİŞTİ] awk ile metin parse etme yerine jq ile JSON alanları okunuyor
+	ping=$(echo "$raw" | jq -r '.ping.latency // empty')
+	down_bw=$(echo "$raw" | jq -r '.download.bandwidth // empty')
+	upl_bw=$(echo "$raw" | jq -r '.upload.bandwidth // empty')
+	server_name=$(echo "$raw" | jq -r '.server.name // empty')
+	url=$(echo "$raw" | jq -r '.result.url // empty')
+	if [[ -z "$ping" || -z "$down_bw" || -z "$upl_bw" ]]; then
+		echo "SPEEDTEST_CLI_FAIL" >"$out_lnk"
+		return 1
+	fi
+	printf "%.2f ms\n" "$ping" >"$out_png"
+	# [DEĞİŞTİ] Ookla JSON'u bant genişliğini "byte/s" olarak verir, Mbps'e çeviriyoruz (x8 / 1e6)
+	down_mbps=$(echo "$down_bw" | awk '{printf "%.2f", $1 * 8 / 1000000}')
+	upl_mbps=$(echo "$upl_bw" | awk '{printf "%.2f", $1 * 8 / 1000000}')
+	echo "${down_mbps} Mbps" >"$out_down"
+	echo "${upl_mbps} Mbps" >"$out_upl"
+	if [[ -n "$url" ]]; then
+		echo "$url" >"$out_lnk"
+	else
+		echo "ookla-speedtest${server_name:+ (${server_name})}" >"$out_lnk"
+	fi
 	[[ -s "$out_png" ]] || echo "N/A" >"$out_png"
 	[[ -s "$out_down" ]] || echo "N/A" >"$out_down"
 	[[ -s "$out_upl" ]] || echo "N/A" >"$out_upl"
@@ -72,21 +105,48 @@ echo ""
 lnk="N/A"
 [[ -f $HOME/speed_lnk ]] && [[ -s $HOME/speed_lnk ]] && lnk=$(cat $HOME/speed_lnk)
 
+if [[ "$lnk" == "JQ_MISSING" ]]; then
+	# [YENİ] JSON çıktısını okumak için jq şart; iki dağıtımda da apt ile kurulur
+	msg_err "jq is required to parse Ookla Speedtest CLI output but is not installed."
+	color_echo "Install with:  apt install jq" "yellow"
+	echo ""
+	color_echo_n "Press ENTER to continue..." "yellow"
+	read -r
+	rm -f $HOME/speed_png $HOME/speed_down $HOME/speed_upl $HOME/speed_lnk $HOME/speed_err 2>/dev/null
+	exit 0
+fi
+
+# [DEĞİŞTİ] Bu blok artık "speedtest-cli" değil "Ookla Speedtest CLI" kurulumunu
+# yapıyor. install.sh çalıştırılmışsa buraya normalde hiç düşülmez; bu sadece
+# script tek başına/elle çalıştırılırsa devreye giren bir yedek (fallback) kurulum.
 if [[ "$lnk" == "SPEEDTEST_CLI_MISSING" ]]; then
-	msg_err "speedtest-cli is required but not installed."
+	msg_err "Ookla Speedtest CLI is required but not installed."
 	if [[ "$(id -u)" -eq 0 ]]; then
-		color_echo "Attempting to install speedtest-cli..." "yellow"
+		color_echo "Attempting to install Ookla Speedtest CLI..." "yellow"
 		echo ""
-		if python3 -m pip install speedtest-cli 2>&1 || pip3 install speedtest-cli 2>&1; then
-			msg_ok "speedtest-cli installed. Run [09] SPEEDTEST again."
-		elif apt-get update -qq 2>/dev/null && apt-get install -y speedtest-cli 2>&1; then
-			msg_ok "speedtest-cli installed (apt). Run [09] SPEEDTEST again."
+		# [DEĞİŞTİ] uname -m -> Ookla arşiv isimlendirmesine çeviriliyor.
+		# Ubuntu 24 ve Debian 12'nin ikisi de aynı arşiv adlarını kullanıyor,
+		# bu yüzden ek bir dağıtım ayrımı gerekmiyor.
+		case "$(uname -m)" in
+			x86_64) arch="x86_64" ;;
+			aarch64|arm64) arch="aarch64" ;;
+			armv7l) arch="armhf" ;;
+			*) arch="" ;;
+		esac
+		tmp=$(mktemp -d)
+		if [[ -z "$arch" ]]; then
+			msg_err "Unsupported architecture: $(uname -m)"
+		elif curl -fsSL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${arch}.tgz" -o "$tmp/speedtest.tgz" 2>/dev/null \
+			&& tar -xzf "$tmp/speedtest.tgz" -C "$tmp" speedtest \
+			&& install -m 0755 "$tmp/speedtest" /usr/local/bin/ookla-speedtest; then
+			msg_ok "Ookla Speedtest CLI installed. Run [09] SPEEDTEST again."
 		else
-			msg_err "Auto-install failed. Errors shown above."
-			color_echo "Install manually:  pip3 install speedtest-cli   or   apt install speedtest-cli" "cyan"
+			msg_err "Auto-install failed."
+			color_echo "Install manually from: https://www.speedtest.net/apps/cli" "cyan"
 		fi
+		rm -rf "$tmp"
 	else
-		color_echo "Install with:  pip3 install speedtest-cli   or   apt install speedtest-cli" "yellow"
+		color_echo "Install manually from: https://www.speedtest.net/apps/cli" "yellow"
 	fi
 	echo ""
 	color_echo_n "Press ENTER to continue..." "yellow"
@@ -96,7 +156,8 @@ if [[ "$lnk" == "SPEEDTEST_CLI_MISSING" ]]; then
 fi
 
 if [[ "$lnk" == "SPEEDTEST_CLI_FAIL" ]]; then
-	msg_err "speedtest-cli ran but produced no output (network or config issue)."
+	# [DEĞİŞTİ] eski mesaj "speedtest-cli ran but produced no output" idi
+	msg_err "Ookla Speedtest CLI ran but produced no output (network, license prompt, or config issue)."
 	[[ -f $HOME/speed_err ]] && [[ -s $HOME/speed_err ]] && { color_echo "Error output:" "yellow"; sed 's/^/  /' "$HOME/speed_err" | head -20; echo ""; }
 	color_echo "Check connectivity to speedtest.net and try again." "cyan"
 	echo ""

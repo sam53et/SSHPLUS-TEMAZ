@@ -30,6 +30,8 @@ if [[ "$confirm" =~ ^[Yy]$ ]]; then
 		rm -f /bin/restartservices /bin/rebootsystem /bin/updatescript /bin/connections 2>/dev/null
 		rm -f /bin/vpsinfo /bin/userinfo /bin/verifatt /bin/uexpired 2>/dev/null
 		rm -f /bin/multiport /bin/vpstraffic /bin/autorun 2>/dev/null
+		# [YENİ] Ookla Speedtest CLI kaldırma sırasında temizleniyor
+		rm -f /usr/local/bin/ookla-speedtest 2>/dev/null
 		# removescript kendi kendini en son siler (çalışırken silinmesi Linux'ta sorunsuzdur)
 		rm -f /bin/removescript 2>/dev/null
 
