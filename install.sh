@@ -224,9 +224,11 @@ check_existing_install() {
 	fi
 }
 
-# Preflight: show required tools (curl, jq, bc, etc.) – one line
+# Preflight: show required tools (curl, jq, etc.) – one line
+# [DÜZELTİLDİ] "bc" listeden çıkarıldı: kod tabanında (Modules/ ve install.sh
+# içinde) hiçbir yerde çağrılmıyor, gereksiz kontrol/kurulumdu.
 preflight_required_tools() {
-	local required=(curl jq bc)
+	local required=(curl jq)
 	local missing=() ok=1
 	for cmd in "${required[@]}"; do
 		if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -235,7 +237,7 @@ preflight_required_tools() {
 		fi
 	done
 	if [[ "$ok" -eq 1 ]]; then
-		step_ok "Required tools: curl jq bc (ok)"
+		step_ok "Required tools: curl jq (ok)"
 	else
 		step_warn "Required tools: missing ${missing[*]}"
 	fi
@@ -259,12 +261,23 @@ if command -v apt-get >/dev/null 2>&1; then
 	APT_AVAILABLE=1
 fi
 
-DEPS_INSTALLER=(curl wget ca-certificates gnupg unzip tar)
+# [DÜZELTİLDİ] Aşağıdaki 6 paket listeden çıkarıldı; tüm Modules/ ve install.sh
+# kodu tarandı, hiçbirinin gerçek bir çağrısı bulunamadı:
+#   - gnupg      : kodda gpg / apt-key / add-apt-repository hiç kullanılmıyor
+#   - unzip      : hiç çağrılmıyor (zip var ama unzip yok)
+#   - bc         : hiç çağrılmıyor
+#   - figlet     : hiç çağrılmıyor (banner elle ASCII olarak yazılı)
+#   - dos2unix   : hiç çağrılmıyor
+#   - python3-pip: hiç "pip install" çağrısı yok; ayrıca Debian'da apt bunu
+#                   Recommends ile kurunca build-essential/gcc/g++/libgd3 gibi
+#                   ~100MB'lık gereksiz bir derleyici zincirini de beraberinde
+#                   çekiyordu (asıl şişkinliğin kaynağı buydu)
+DEPS_INSTALLER=(curl wget ca-certificates tar)
 DEPS_RUNTIME=(
-	wget curl bc screen nano unzip zip lsof net-tools dos2unix nload jq figlet
+	wget curl screen nano zip lsof net-tools nload jq
 	# [DEĞİŞTİ] "speedtest-cli" bu listeden çıkarıldı; jq zaten burada olduğu
 	# için Ookla CLI'nin JSON çıktısını parse etmek için ek paket gerekmiyor
-	python3 python3-pip iproute2 cron
+	python3 iproute2 cron
 )
 
 # [YENİ] Ookla Speedtest CLI apt paketiyle DEĞİL, doğrudan Ookla'nın statik
