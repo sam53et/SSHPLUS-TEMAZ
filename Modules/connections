@@ -1818,6 +1818,217 @@ exit 0' >$RCLOCAL
 		}
 	}
 
+	# BADVPN UDPGW eklendi - UDP forwarding servisi kurulum/yonetim fonksiyonu
+	fun_udpgw() {
+		local svc="badvpn-udpgw"
+		local unit="/etc/systemd/system/${svc}.service"
+		local bin="/usr/local/bin/badvpn-udpgw"
+		local src="/usr/local/src/badvpn"
+
+		# BADVPN UDPGW eklendi - kurulu mu kontrol et (systemd unit + binary)
+		if [[ -f "$unit" ]] && [[ -x "$bin" ]]; then
+			clear
+			local cur_port
+			cur_port=$(grep -oE -- '--listen-addr [0-9.]+:[0-9]+' "$unit" | awk -F: '{print $NF}')
+			[[ -z "$cur_port" ]] && cur_port="7300"
+			if systemctl is-active --quiet "$svc" 2>/dev/null; then
+				udpst="\033[1;32m◉ "
+			else
+				udpst="\033[1;31m○ "
+			fi
+			banner_info "            MANAGE BADVPN UDPGW             "
+			echo ""
+			echo -e "\033[1;33mPORT: \033[1;32m$cur_port  \033[1;33mSTATUS: $udpst"
+			echo ""
+			menu_option "1" "CHANGE PORT" "red" "yellow"
+			menu_option "2" "REMOVE BADVPN UDPGW" "red" "yellow"
+			menu_option "0" "BACK" "red" "yellow"
+			echo ""
+			color_echo_n "PLEASE SELECT FROM OPTIONS " "green"
+			color_echo_n "?" "yellow"
+			color_echo_n " " "white"
+			read resposta
+			if [[ "$resposta" = '1' ]]; then
+				echo ""
+				color_echo_n "WHICH PORT DO YOU WANT TO USE " "green"
+				color_echo_n "?" "yellow"
+				color_echo_n " " "white"
+				read porta
+				[[ -z "$porta" ]] && {
+					echo ""
+					msg_err "Invalid port!"
+					sleep 2
+					clear
+					fun_connections
+				}
+				fun_udpgwport() {
+					sed -i -E "s/--listen-addr [0-9.]+:[0-9]+/--listen-addr 127.0.0.1:${porta}/" "$unit"
+					systemctl daemon-reload
+					systemctl restart "$svc"
+				}
+				echo ""
+				color_echo "CHANGING BADVPN UDPGW PORT!" "green"
+				echo ""
+				fun_bar 'fun_udpgwport'
+				echo ""
+				if systemctl is-active --quiet "$svc" 2>/dev/null; then
+					msg_ok "PORT CHANGED SUCCESSFULLY!"
+				else
+					msg_err "UNEXPECTED ERROR!"
+				fi
+				sleep 2
+				clear
+				fun_connections
+			elif [[ "$resposta" = '2' ]]; then
+				echo ""
+				color_echo_n "DO YOU REALLY WANT TO REMOVE BADVPN UDPGW " "green"
+				color_echo_n "? " "red"
+				color_echo_n "[y/n]: " "yellow"
+				read resp
+				[[ "$resp" = 'y' ]] && {
+					fun_udpgwrm() {
+						systemctl stop "$svc" 2>/dev/null
+						systemctl disable "$svc" 2>/dev/null
+						rm -f "$unit"
+						rm -f "$bin"
+						rm -rf "$src"
+						systemctl daemon-reload
+						systemctl reset-failed "$svc" 2>/dev/null
+					}
+					echo ""
+					color_echo "REMOVING BADVPN UDPGW!" "green"
+					echo ""
+					fun_bar 'fun_udpgwrm'
+					echo ""
+					msg_ok "SUCCESSFULLY REMOVED BADVPN UDPGW!"
+					sleep 2
+					clear
+					fun_connections
+				} || {
+					echo ""
+					msg_err "Returning..."
+					sleep 2
+					clear
+					fun_connections
+				}
+			elif [[ "$resposta" = '0' ]]; then
+				echo ""
+				msg_err "Returning..."
+				sleep 1
+				clear
+				fun_connections
+			else
+				echo ""
+				msg_err "Invalid option !"
+				sleep 2
+				clear
+				fun_udpgw
+			fi
+		else
+			# BADVPN UDPGW eklendi - kurulu degil, kurulum sihirbazi
+			clear
+			banner_info "           BADVPN UDPGW INSTALLER            "
+			echo ""
+			msg_warn "[!] THIS ENABLES UDP SUPPORT (GAMES, VOICE/VIDEO CALLS) OVER THE TUNNEL"
+			echo ""
+			# BADVPN UDPGW eklendi - desteklenen sistem kontrolu (Ubuntu 22/24, Debian 12/13); diger surumlerde de calismaya devam eder, sadece bilgi verilir
+			local _os_ok=0
+			if [[ -f /etc/os-release ]]; then
+				. /etc/os-release
+				case "${ID}-${VERSION_ID}" in
+					ubuntu-22.04 | ubuntu-24.04 | debian-12 | debian-13) _os_ok=1 ;;
+				esac
+			fi
+			[[ "$_os_ok" != "1" ]] && msg_warn "[!] UNTESTED OS - SUPPORTED: UBUNTU 22/24, DEBIAN 12/13. CONTINUING ANYWAY."
+			echo ""
+			color_echo_n "DO YOU WANT TO CONTINUE " "green"
+			color_echo_n "? " "red"
+			color_echo_n "[y/n]: " "yellow"
+			read resp
+			[[ "$resp" = 'y' ]] && {
+				echo ""
+				read -p "$(echo -e "\033[1;32mWHICH PORT DO YOU WANT TO USE? \033[1;37m")" -e -i 7300 porta
+				[[ -z "$porta" ]] && {
+					echo ""
+					msg_err "Invalid port!"
+					sleep 2
+					clear
+					fun_connections
+				}
+				[[ "$(ss -lunp 2>/dev/null | grep -w ":${porta}" | wc -l)" != '0' ]] && {
+					echo ""
+					msg_err "PORT ALREADY IN USE (UDP)!"
+					sleep 3
+					clear
+					fun_connections
+				}
+				echo ""
+				color_echo "INSTALLING BUILD DEPENDENCIES" "green"
+				echo ""
+				fun_udpgwdeps() {
+					apt-get update -y
+					apt-get install -y git cmake build-essential
+				}
+				fun_bar 'fun_udpgwdeps'
+				echo ""
+				color_echo "DOWNLOADING AND COMPILING BADVPN UDPGW" "green"
+				echo ""
+				fun_udpgwbuild() {
+					rm -rf "$src"
+					git clone --depth 1 https://github.com/ambrop72/badvpn.git "$src"
+					mkdir -p "$src/build"
+					( cd "$src/build" && cmake .. -DBUILD_NOTHING_BY_DEFAULT=1 -DBUILD_UDPGW=1 >/dev/null 2>&1 && make -j"$(nproc)" >/dev/null 2>&1 )
+					install -m 755 "$src/build/udpgw/badvpn-udpgw" "$bin" 2>/dev/null
+				}
+				fun_bar 'fun_udpgwbuild'
+				if [[ ! -x "$bin" ]]; then
+					echo ""
+					msg_err "BUILD FAILED! CHECK CONNECTIVITY/DEPENDENCIES."
+					sleep 3
+					clear
+					fun_connections
+				fi
+				echo ""
+				color_echo "CONFIGURING BADVPN UDPGW SERVICE" "green"
+				echo ""
+				fun_udpgwsvc() {
+					cat <<-EOF >"$unit"
+						[Unit]
+						Description=BadVPN UDP Gateway (badvpn-udpgw)
+						After=network.target
+
+						[Service]
+						ExecStart=${bin} --listen-addr 127.0.0.1:${porta} --max-clients 1000
+						Restart=always
+						RestartSec=3
+						User=nobody
+
+						[Install]
+						WantedBy=multi-user.target
+					EOF
+					systemctl daemon-reload
+					systemctl enable --now "$svc"
+				}
+				fun_bar 'fun_udpgwsvc'
+				echo ""
+				if systemctl is-active --quiet "$svc" 2>/dev/null; then
+					msg_ok "BADVPN UDPGW SUCCESSFULLY INSTALLED! PORT: $porta"
+				else
+					msg_err "UNEXPECTED ERROR! SERVICE DID NOT START."
+				fi
+				sleep 3
+				clear
+				fun_connections
+			} || {
+				echo ""
+				msg_err "Returning..."
+				sleep 2
+				clear
+				fun_connections
+			}
+		fi
+	}
+
 	x="ok"
 	fun_connections() {
 		while true $x != "ok"; do
@@ -1865,6 +2076,13 @@ exit 0' >$RCLOCAL
 			} || {
 				sts1="\033[1;31m○ "
 			}
+			# BADVPN UDPGW eklendi - durum tespiti (systemd servis aktif mi)
+			if systemctl is-active --quiet badvpn-udpgw 2>/dev/null; then
+				echo -e "\033[1;32mSERVICE: \033[1;33mBADVPN UDPGW \033[1;32mPORT: \033[1;37m$(grep -oE -- '--listen-addr [0-9.]+:[0-9]+' /etc/systemd/system/badvpn-udpgw.service 2>/dev/null | awk -F: '{print $NF}')"
+				sts8="\033[1;32m◉ "
+			else
+				sts8="\033[1;31m○ "
+			fi
 			# Use color codes for menu borders and items
 			blue_code=$(get_color_code "blue")
 			red_code=$(get_color_code "red")
@@ -1883,6 +2101,7 @@ exit 0' >$RCLOCAL
 			echo -e "${red_code}[${cyan_code}05${red_code}] ${white_code}• ${yellow_code}SOCKS PROXY $sts4${reset_code}"
 			echo -e "${red_code}[${cyan_code}06${red_code}] ${white_code}• ${yellow_code}SSL TUNNEL $sts3${reset_code}"
 			echo -e "${red_code}[${cyan_code}07${red_code}] ${white_code}• ${yellow_code}SSLH MULTIPLEX $sts7${reset_code}"
+			echo -e "${red_code}[${cyan_code}08${red_code}] ${white_code}• ${yellow_code}BADVPN UDPGW $sts8${reset_code}"
 			echo -e "${red_code}[${cyan_code} 0${red_code}] ${white_code}• ${yellow_code}BACK ${green_code}<${yellow_code}<${red_code}<${reset_code}"
 			echo -e "${red_code}[${cyan_code}00${red_code}] ${white_code}• ${yellow_code}EXIT ${green_code}<${yellow_code}<${red_code}<${reset_code}"
 			echo ""
@@ -1917,6 +2136,10 @@ exit 0' >$RCLOCAL
 				;;
 			7 | 07)
 				fun_sslh
+				;;
+			8 | 08)
+				# BADVPN UDPGW eklendi - menu secim yonlendirmesi
+				fun_udpgw
 				;;
 			0)
 				menu
